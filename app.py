@@ -128,7 +128,7 @@ input[type="file"] { display: none; }
 <body>
 <div class="container">
     <h1>HWPX 논문 서식 편집기</h1>
-    <p class="subtitle">채정이만을 위해 사랑을 담아 만든 서비스</p>
+    <p class="subtitle">❤️❤️❤️ 채정이만을 위해 사랑을 담아 만든 서비스 ❤️❤️❤️</p>
 
     <div class="upload-area" id="dropZone" onclick="document.getElementById('fileInput').click()">
         <div class="spinner" id="spinner"></div>
