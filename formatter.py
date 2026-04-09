@@ -39,6 +39,24 @@ def detect_style(text):
     return "body"
 
 
+def apply_section_line_spacing(extracted_dir):
+    """section0.xml 내 인라인 lineSpacing 요소도 수정."""
+    section_path = os.path.join(extracted_dir, "Contents", "section0.xml")
+    tree = parse_xml(section_path)
+    root = tree.getroot()
+    ns_hh = NAMESPACES["hh"]
+    ls_type = FORMAT_CONFIG["line_spacing_type"]
+    ls_value = str(FORMAT_CONFIG["line_spacing_value"])
+    count = 0
+    for line_sp in root.iter("{%s}lineSpacing" % ns_hh):
+        line_sp.set("type", ls_type)
+        line_sp.set("value", ls_value)
+        count += 1
+    if count > 0:
+        save_xml(tree, section_path)
+    return count
+
+
 def apply_page_format(extracted_dir):
     """페이지 여백 및 크기 설정 적용."""
     section_path = os.path.join(extracted_dir, "Contents", "section0.xml")
@@ -73,7 +91,7 @@ def apply_font_faces(extracted_dir):
     for fontface in root.iter("{%s}fontface" % NAMESPACES["hh"]):
         lang = fontface.get("lang", "")
         for font_el in fontface.iter("{%s}font" % NAMESPACES["hh"]):
-            if lang in ("HANGUL", "HANJA", "JAPANESE", "OTHER"):
+            if lang in ("HANGUL", "HANJA", "JAPANESE", "OTHER", "SYMBOL", "USER"):
                 font_el.set("face", font_cfg["face_hangul"])
             elif lang == "LATIN":
                 font_el.set("face", font_cfg["face_latin"])
@@ -152,11 +170,78 @@ def ensure_char_pr(header_tree, size, bold):
     return new_id
 
 
+def ensure_para_pr(header_tree, align, indent):
+    """
+    header.xml의 paraProperties에서 해당 align/indent 조합의 paraPr을 찾거나 새로 생성.
+    paraPr id를 반환.
+    """
+    root = header_tree.getroot()
+    ns_hh = NAMESPACES["hh"]
+    ns_hc = NAMESPACES["hc"]
+
+    para_props = root.find(".//{%s}paraProperties" % ns_hh)
+    if para_props is None:
+        return "0"
+
+    ls_type = FORMAT_CONFIG["line_spacing_type"]
+    ls_value = str(FORMAT_CONFIG["line_spacing_value"])
+
+    # 기존 paraPr에서 매칭되는 것 찾기
+    for pp in para_props.findall("{%s}paraPr" % ns_hh):
+        align_el = pp.find("{%s}align" % ns_hh)
+        if align_el is None:
+            continue
+        pp_align = align_el.get("horizontal", "")
+        if pp_align != align:
+            continue
+
+        # indent 확인: hp:switch > hp:case > hh:margin > hc:intent 또는 hp:default > hh:margin > hc:intent
+        pp_indent = 0
+        for margin in pp.iter("{%s}margin" % ns_hh):
+            intent_el = margin.find("{%s}intent" % ns_hc)
+            if intent_el is not None:
+                pp_indent = int(intent_el.get("value", "0"))
+                break
+        if pp_indent == indent:
+            return pp.get("id")
+
+    # 없으면 새로 생성
+    existing = para_props.findall("{%s}paraPr" % ns_hh)
+    if not existing:
+        return "0"
+
+    new_pp = etree.fromstring(etree.tostring(existing[0]))
+    new_id = str(max(int(pp.get("id", "0")) for pp in existing) + 1)
+    new_pp.set("id", new_id)
+
+    # align 설정
+    for align_el in new_pp.iter("{%s}align" % ns_hh):
+        align_el.set("horizontal", align)
+
+    # indent 설정 (모든 margin 내의 intent 요소)
+    for margin in new_pp.iter("{%s}margin" % ns_hh):
+        intent_el = margin.find("{%s}intent" % ns_hc)
+        if intent_el is not None:
+            intent_el.set("value", str(indent))
+
+    # lineSpacing도 맞춰서 설정
+    for line_sp in new_pp.iter("{%s}lineSpacing" % ns_hh):
+        line_sp.set("type", ls_type)
+        line_sp.set("value", ls_value)
+
+    # itemCnt 업데이트
+    item_cnt = int(para_props.get("itemCnt", "0"))
+    para_props.set("itemCnt", str(item_cnt + 1))
+    para_props.append(new_pp)
+
+    return new_id
+
+
 def apply_paragraph_styles(extracted_dir):
     """
     section0.xml의 각 문단 텍스트를 분석하여 스타일별 서식 적용.
     - charPrIDRef 변경 (글꼴 크기, 굵기)
-    - 문단 정렬, 들여쓰기는 인라인으로 적용
+    - paraPrIDRef 변경 (정렬, 들여쓰기)
     """
     header_path = os.path.join(extracted_dir, "Contents", "header.xml")
     header_tree = parse_xml(header_path)
@@ -166,8 +251,6 @@ def apply_paragraph_styles(extracted_dir):
     root = section_tree.getroot()
 
     ns_hp = NAMESPACES["hp"]
-    ns_hh = NAMESPACES["hh"]
-    ns_hc = NAMESPACES["hc"]
 
     styles_cfg = FORMAT_CONFIG["styles"]
 
@@ -177,19 +260,18 @@ def apply_paragraph_styles(extracted_dir):
         style_name = detect_style(text)
         style = styles_cfg.get(style_name, styles_cfg["body"])
 
-        # charPr 찾거나 생성
+        # charPr 찾거나 생성 (글꼴 크기, 굵기)
         char_pr_id = ensure_char_pr(header_tree, style["size"], style["bold"])
-
-        # 모든 run의 charPrIDRef 변경
         for run in para.iter("{%s}run" % ns_hp):
             run.set("charPrIDRef", char_pr_id)
 
-        # 문단 인라인 속성은 section에서 직접 설정하기 어려우므로
-        # paraPrIDRef를 통해 header의 paraPr을 참조함
-        # → 간단히 처리: 첫 번째 논문 제목 감지 (특별 처리)
-        if style_name == "title":
-            # 논문 제목은 첫 문단에서 감지해야 하므로 별도 로직 필요할 수 있음
-            pass
+        # paraPr 찾거나 생성 (정렬, 들여쓰기)
+        para_pr_id = ensure_para_pr(
+            header_tree,
+            style["align"],
+            style.get("indent", 0),
+        )
+        para.set("paraPrIDRef", para_pr_id)
 
     save_xml(header_tree, header_path)
     save_xml(section_tree, section_path)
@@ -217,9 +299,10 @@ def format_hwpx(input_path, output_path):
         apply_font_faces(extracted)
         print("  ✓ 글꼴 적용")
 
-        # 3. 줄간격
+        # 3. 줄간격 (header + section 인라인)
         apply_line_spacing(extracted)
-        print("  ✓ 줄간격 180% 적용")
+        sec_ls = apply_section_line_spacing(extracted)
+        print(f"  ✓ 줄간격 180% 적용 (section 인라인: {sec_ls}개)")
 
         # 4. 문단별 스타일 (크기, 굵기)
         stats = apply_paragraph_styles(extracted)
