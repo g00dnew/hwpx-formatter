@@ -153,7 +153,7 @@ input[type="file"] { display: none; }
             <tr><th>소절 (1.1.1.)</th><td>10pt, 굵게</td></tr>
             <tr><th>본문</th><td>10pt, 들여쓰기 2칸, 혼합정렬</td></tr>
             <tr><th>줄간격</th><td>180%</td></tr>
-            <tr><th>글꼴</th><td>함초롬바탕</td></tr>
+            <tr><th>글꼴</th><td>바탕체</td></tr>
         </table>
     </div>
 

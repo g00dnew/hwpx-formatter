@@ -76,8 +76,8 @@ FORMAT_CONFIG = {
 
     # 글꼴
     "font": {
-        "face_hangul": "함초롬바탕",
-        "face_latin": "함초롬바탕",
+        "face_hangul": "바탕체",
+        "face_latin": "바탕체",
     },
 }
 
