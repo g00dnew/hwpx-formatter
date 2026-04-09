@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+*.hwpx
+templates/
+.omc/
+.claude/
