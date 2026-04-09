@@ -5,3 +5,4 @@ __pycache__/
 templates/
 .omc/
 .claude/
+.vercel
