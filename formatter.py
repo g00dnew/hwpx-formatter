@@ -97,6 +97,12 @@ def apply_line_spacing(extracted_dir):
     save_xml(tree, header_path)
 
 
+def _has_bold_element(char_pr):
+    """charPr에 <hh:bold/> 자식 요소가 있는지 확인."""
+    ns_hh = NAMESPACES["hh"]
+    return char_pr.find("{%s}bold" % ns_hh) is not None
+
+
 def ensure_char_pr(header_tree, size, bold):
     """
     header.xml의 charProperties에서 해당 size/bold 조합의 charPr을 찾거나 새로 생성.
@@ -111,10 +117,9 @@ def ensure_char_pr(header_tree, size, bold):
 
     # 기존 charPr에서 매칭되는 것 찾기
     for cp in char_props.findall("{%s}charPr" % ns_hh):
-        cp_height = cp.get("height", "0")
-        cp_bold = cp.get("bold", "0")
-        is_bold = cp_bold == "1"
-        if int(cp_height) == size and is_bold == bold:
+        cp_height = int(cp.get("height", "0"))
+        cp_bold = _has_bold_element(cp)
+        if cp_height == size and cp_bold == bold:
             return cp.get("id")
 
     # 없으면 새로 생성 (기존 첫 번째를 복사)
@@ -126,11 +131,18 @@ def ensure_char_pr(header_tree, size, bold):
     new_id = str(max(int(cp.get("id", "0")) for cp in existing) + 1)
     new_cp.set("id", new_id)
     new_cp.set("height", str(size))
-    if bold:
-        new_cp.set("bold", "1")
-    else:
-        if "bold" in new_cp.attrib:
-            del new_cp.attrib["bold"]
+
+    # bold 처리: <hh:bold/> 자식 요소 추가/제거
+    existing_bold = new_cp.find("{%s}bold" % ns_hh)
+    if bold and existing_bold is None:
+        # underline 앞에 삽입 (원본 순서 유지)
+        underline = new_cp.find("{%s}underline" % ns_hh)
+        bold_el = etree.SubElement(new_cp, "{%s}bold" % ns_hh)
+        if underline is not None:
+            new_cp.remove(bold_el)
+            new_cp.insert(list(new_cp).index(underline), bold_el)
+    elif not bold and existing_bold is not None:
+        new_cp.remove(existing_bold)
 
     # itemCnt 업데이트
     item_cnt = int(char_props.get("itemCnt", "0"))
